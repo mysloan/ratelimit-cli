@@ -1,0 +1,14 @@
+[package]
+name = "ratelimit-cli"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "A token bucket rate limiter library with a CLI for replaying event logs through it."
+
+[lib]
+name = "ratelimit"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ratelimit"
+path = "src/main.rs"
