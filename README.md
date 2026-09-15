@@ -16,6 +16,9 @@ without having to stand up the live limiter first.
 
 ## Library
 
+Two algorithms are available, both implementing the `RateLimiter` trait so
+callers can swap between them without changing the calling code.
+
 `ratelimit::TokenBucketLimiter` keeps one bucket per key (client id, IP,
 route, whatever you pass in). Each bucket refills continuously at a fixed
 rate up to a capacity, and `check` consumes one token if available.
@@ -24,6 +27,23 @@ rate up to a capacity, and `check` consumes one token if available.
 use ratelimit::TokenBucketLimiter;
 
 let mut limiter = TokenBucketLimiter::new(/* capacity */ 20.0, /* per second */ 5.0);
+
+if limiter.check("api-key-123", now_ms) {
+    // proceed
+} else {
+    // reject with 429
+}
+```
+
+`ratelimit::SlidingWindowLimiter` instead keeps a log of request timestamps
+per key and allows at most `limit` requests in any trailing `window_ms`
+window. It never lets a burst inside the window exceed `limit`, which the
+token bucket can if requests land right as it refills.
+
+```rust
+use ratelimit::SlidingWindowLimiter;
+
+let mut limiter = SlidingWindowLimiter::new(/* limit */ 100, /* window_ms */ 60_000);
 
 if limiter.check("api-key-123", now_ms) {
     // proceed
@@ -57,6 +77,17 @@ $ ratelimit --rate 1 --burst 3 --input requests.log
 5000 alice ALLOW
 ```
 
+Pass `--algo sliding-window` to check against a sliding window log instead:
+
+```
+$ ratelimit --algo sliding-window --limit 3 --window-ms 1000 --input requests.log
+1000 alice ALLOW
+1000 alice ALLOW
+1000 alice ALLOW
+1200 alice DENY
+5000 alice ALLOW
+```
+
 It reads from stdin when `--input` is omitted (or is `-`), so it fits into a
 pipeline:
 
@@ -66,14 +97,21 @@ $ tail -f /var/log/app/access.log | ./extract-key-and-ts.sh | ratelimit --rate 1
 
 ### Flags
 
+- `--algo <token-bucket|sliding-window>` — algorithm to check against, default `token-bucket`
+- `--input <path>` — file to read, or `-`/omitted for stdin
+
+token-bucket:
 - `--rate <tokens/sec>` — refill rate, default `1`
 - `--burst <capacity>` — bucket size, default `5`
-- `--input <path>` — file to read, or `-`/omitted for stdin
+
+sliding-window:
+- `--limit <count>` — max requests per window, default `5`
+- `--window-ms <ms>` — window size in milliseconds, default `1000`
 
 ## Status
 
-Early. Only the token bucket algorithm is implemented; see the roadmap for
-what's next.
+Early. Token bucket and sliding window log algorithms are implemented; see
+the roadmap for what's next.
 
 ## License
 
