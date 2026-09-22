@@ -95,10 +95,23 @@ pipeline:
 $ tail -f /var/log/app/access.log | ./extract-key-and-ts.sh | ratelimit --rate 10 --burst 50
 ```
 
+Pass `--format json` for one JSON object per line instead, if something
+downstream is going to parse the output:
+
+```
+$ ratelimit --rate 1 --burst 3 --format json --input requests.log
+{"timestamp_ms":1000,"key":"alice","decision":"ALLOW"}
+{"timestamp_ms":1000,"key":"alice","decision":"ALLOW"}
+{"timestamp_ms":1000,"key":"alice","decision":"ALLOW"}
+{"timestamp_ms":1200,"key":"alice","decision":"DENY"}
+{"timestamp_ms":5000,"key":"alice","decision":"ALLOW"}
+```
+
 ### Flags
 
 - `--algo <token-bucket|sliding-window>` — algorithm to check against, default `token-bucket`
 - `--input <path>` — file to read, or `-`/omitted for stdin
+- `--format <text|json>` — output format, default `text`
 
 token-bucket:
 - `--rate <tokens/sec>` — refill rate, default `1`

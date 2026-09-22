@@ -7,6 +7,11 @@ enum Algo {
     SlidingWindow,
 }
 
+enum Format {
+    Text,
+    Json,
+}
+
 struct Args {
     algo: Algo,
     rate: f64,
@@ -14,6 +19,7 @@ struct Args {
     limit: usize,
     window_ms: u64,
     input: Option<String>,
+    format: Format,
 }
 
 fn parse_args() -> Args {
@@ -23,6 +29,7 @@ fn parse_args() -> Args {
     let mut limit = 5;
     let mut window_ms = 1000;
     let mut input = None;
+    let mut format = Format::Text;
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -82,6 +89,18 @@ fn parse_args() -> Args {
                         .clone(),
                 );
             }
+            "--format" => {
+                i += 1;
+                format = match raw
+                    .get(i)
+                    .unwrap_or_else(|| fail("--format requires a value"))
+                    .as_str()
+                {
+                    "text" => Format::Text,
+                    "json" => Format::Json,
+                    other => fail(&format!("unknown --format {other:?}, expected text or json")),
+                };
+            }
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -98,6 +117,7 @@ fn parse_args() -> Args {
         limit,
         window_ms,
         input,
+        format,
     }
 }
 
@@ -113,6 +133,7 @@ fn print_usage() {
          Reads lines of \"<timestamp_ms> <key>\" from --input, or from stdin if\n\
          --input is omitted or is \"-\". Prints each line back out with ALLOW or\n\
          DENY appended, according to a rate limiter shared per key.\n\n\
+         \x20 --format <text|json>  output format, default text\n\n\
          token-bucket options (default algorithm):\n\
          \x20 --rate <tokens/sec>   refill rate, default 1\n\
          \x20 --burst <capacity>    bucket size, default 5\n\n\
@@ -173,6 +194,34 @@ fn main() {
         };
 
         let allowed = limiter.check(key, now_ms);
-        println!("{} {} {}", now_ms, key, if allowed { "ALLOW" } else { "DENY" });
+        let decision = if allowed { "ALLOW" } else { "DENY" };
+        match args.format {
+            Format::Text => println!("{now_ms} {key} {decision}"),
+            Format::Json => println!(
+                "{{\"timestamp_ms\":{},\"key\":{},\"decision\":\"{}\"}}",
+                now_ms,
+                json_string(key),
+                decision
+            ),
+        }
     }
+}
+
+/// Renders `s` as a quoted JSON string literal.
+fn json_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
 }
