@@ -107,11 +107,20 @@ $ ratelimit --rate 1 --burst 3 --format json --input requests.log
 {"timestamp_ms":5000,"key":"alice","decision":"ALLOW"}
 ```
 
+Pass `--summary` to get allow/deny counts per key instead of a line per
+request. Keys are printed in sorted order, and `--format json` works here too:
+
+```
+$ ratelimit --rate 1 --burst 3 --summary --input requests.log
+alice allow=4 deny=1
+```
+
 ### Flags
 
 - `--algo <token-bucket|sliding-window>` — algorithm to check against, default `token-bucket`
 - `--input <path>` — file to read, or `-`/omitted for stdin
 - `--format <text|json>` — output format, default `text`
+- `--summary` — print per-key allow/deny counts instead of per-request lines
 
 token-bucket:
 - `--rate <tokens/sec>` — refill rate, default `1`

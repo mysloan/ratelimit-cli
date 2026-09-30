@@ -1,4 +1,5 @@
 use ratelimit::{RateLimiter, SlidingWindowLimiter, TokenBucketLimiter};
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 
@@ -20,6 +21,7 @@ struct Args {
     window_ms: u64,
     input: Option<String>,
     format: Format,
+    summary: bool,
 }
 
 fn parse_args() -> Args {
@@ -30,6 +32,7 @@ fn parse_args() -> Args {
     let mut window_ms = 1000;
     let mut input = None;
     let mut format = Format::Text;
+    let mut summary = false;
 
     let raw: Vec<String> = std::env::args().skip(1).collect();
     let mut i = 0;
@@ -101,6 +104,7 @@ fn parse_args() -> Args {
                     other => fail(&format!("unknown --format {other:?}, expected text or json")),
                 };
             }
+            "--summary" => summary = true,
             "-h" | "--help" => {
                 print_usage();
                 std::process::exit(0);
@@ -118,6 +122,7 @@ fn parse_args() -> Args {
         window_ms,
         input,
         format,
+        summary,
     }
 }
 
@@ -133,7 +138,9 @@ fn print_usage() {
          Reads lines of \"<timestamp_ms> <key>\" from --input, or from stdin if\n\
          --input is omitted or is \"-\". Prints each line back out with ALLOW or\n\
          DENY appended, according to a rate limiter shared per key.\n\n\
-         \x20 --format <text|json>  output format, default text\n\n\
+         \x20 --format <text|json>  output format, default text\n\
+         \x20 --summary             print allow/deny counts per key instead of\n\
+         \x20                       a line per request\n\n\
          token-bucket options (default algorithm):\n\
          \x20 --rate <tokens/sec>   refill rate, default 1\n\
          \x20 --burst <capacity>    bucket size, default 5\n\n\
@@ -159,6 +166,8 @@ fn main() {
             Box::new(BufReader::new(file))
         }
     };
+
+    let mut totals: BTreeMap<String, (u64, u64)> = BTreeMap::new();
 
     for (lineno, line) in reader.lines().enumerate() {
         let line = match line {
@@ -194,6 +203,17 @@ fn main() {
         };
 
         let allowed = limiter.check(key, now_ms);
+
+        if args.summary {
+            let counts = totals.entry(key.to_string()).or_insert((0, 0));
+            if allowed {
+                counts.0 += 1;
+            } else {
+                counts.1 += 1;
+            }
+            continue;
+        }
+
         let decision = if allowed { "ALLOW" } else { "DENY" };
         match args.format {
             Format::Text => println!("{now_ms} {key} {decision}"),
@@ -204,6 +224,26 @@ fn main() {
                 decision
             ),
         }
+    }
+
+    if args.summary {
+        for (key, &(allow, deny)) in &totals {
+            println!("{}", summary_line(&args.format, key, allow, deny));
+        }
+    }
+}
+
+/// Formats one key's totals. Keys are sorted by the caller (BTreeMap) so the same
+/// log always yields the same output.
+fn summary_line(format: &Format, key: &str, allow: u64, deny: u64) -> String {
+    match format {
+        Format::Text => format!("{key} allow={allow} deny={deny}"),
+        Format::Json => format!(
+            "{{\"key\":{},\"allow\":{},\"deny\":{}}}",
+            json_string(key),
+            allow,
+            deny
+        ),
     }
 }
 
@@ -224,4 +264,22 @@ fn json_string(s: &str) -> String {
     }
     out.push('"');
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn summary_line_text() {
+        assert_eq!(summary_line(&Format::Text, "alice", 3, 1), "alice allow=3 deny=1");
+    }
+
+    #[test]
+    fn summary_line_json_escapes_key() {
+        assert_eq!(
+            summary_line(&Format::Json, "a\"b", 0, 2),
+            "{\"key\":\"a\\\"b\",\"allow\":0,\"deny\":2}"
+        );
+    }
 }
